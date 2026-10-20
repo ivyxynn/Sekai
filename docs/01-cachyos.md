@@ -116,70 +116,62 @@ sekitar 17 GB sisa lega. Itu cukup nyaman.
 
 Tapi free space kamu cuma 50.6 GB, dan Windows tidak akan membiarkan kamu shrink
 sampai habis — ada file yang tidak bisa dipindah (pagefile, System Restore,
-file yang sedang dipakai). Realistisnya kamu mungkin hanya bisa shrink
-**40–45 GB**.
+file yang sedang dipakai).
 
-Kalau begitu, dua pilihan:
+**Kabar baiknya: 50.6 GB itu bukan batas.** Scan rekursif menemukan ~36 GB yang
+aman dibebaskan:
 
-1. **Bersihkan Windows dulu** (lihat 1.4), lalu shrink lebih besar
-2. **Terima 45 GB**: 4 GB `/boot` + 41 GB root, sisa ~12 GB. Bisa jalan, tapi
-   kamu akan sering kehabisan ruang saat update besar
+| Sumber | Ukuran |
+|---|---|
+| `Documents` (total) | 25.8 GB |
+| ↳ `Plant Ai EVe` | 14.9 GB |
+| ↳ `1Magang` | 2.2 GB |
+| `Downloads` (total) | 17.1 GB |
+| ↳ cache IDM | 4.0 GB |
+| ↳ ISO CachyOS | 3.0 GB ← **simpan** |
+| `Videos` (total) | 6.8 GB |
+
+Setelah dibersihkan, free space naik ke **~87 GB**. Shrink 50 GB jadi nyaman:
+Windows masih punya ~37 GB, CachyOS dapat 50 GB.
+
+**Urutan yang disarankan:**
+
+1. Hapus cache IDM (4 GB) — 1 menit
+2. Pindahkan `Documents` + `Videos` ke drive eksternal (~32 GB) — sekaligus backup
+3. Baru shrink
+
+Detail perintahnya di
+[00-persiapan.md §0.5b](00-persiapan.md#05b-membersihkan-windows-kalau-shrink-kurang).
+
+Kalau kamu **tidak** mau membersihkan apa pun dan tetap coba shrink sekarang,
+kemungkinan besar Windows hanya menawarkan 30–45 GB. Itu masih bisa jalan:
+4 GB `/boot` + sisanya root, dengan sisa ~5–15 GB. Bisa, tapi sempit.
 
 ---
 
 ## 1.4 Membersihkan Windows dulu (disarankan)
 
-Sebelum shrink, bebaskan ruang. Yang paling besar hasilnya:
+**Langkah lengkapnya ada di
+[00-persiapan.md §0.5b](00-persiapan.md#05b-membersihkan-windows-kalau-shrink-kurang)** —
+termasuk daftar folder konkret di mesin kamu beserta ukurannya. Jangan duplikasi
+di sini supaya tidak ada dua versi yang bisa berbeda.
 
-### a. Disk Cleanup sistem
+Ringkasnya:
 
-```powershell
-cleanmgr /sageset:1
-```
+1. Hapus cache IDM (`DwnlData`) — 4 GB, aman
+2. Pindahkan `Documents` + `Videos` ke drive eksternal — ~32 GB, sekaligus backup
+3. `cleanmgr /sageset:1` lalu `cleanmgr /sagerun:1`
+4. Matikan System Restore sementara
 
-Centang semua, terutama **Windows Update Cleanup**, **Previous Windows
-installation(s)**, **Delivery Optimization Files**. Lalu:
-
-```powershell
-cleanmgr /sagerun:1
-```
-
-### b. Cek file besar
-
-```powershell
-Get-ChildItem C:\Users\Asus -Recurse -File -ErrorAction SilentlyContinue |
-  Sort-Object Length -Descending | Select-Object -First 25 |
-  Select-Object @{n='GB';e={[math]::Round($_.Length/1GB,2)}},FullName
-```
-
-### c. Pindahkan yang memang bisa pindah
-
-- `C:\Users\Asus\Documents` — ini isi tugas kuliah, banyak yang bisa ke drive
-  eksternal
-- Folder `Downloads`, `Videos`, `Pictures` yang besar
-- Cache aplikasi (browser, Discord, game launcher)
-
-### d. Matikan System Restore sementara
-
-System Restore menyimpan `System Volume Information` yang tidak bisa dipindah
-dan **memblokir shrink**. Matikan sementara, shrink, lalu nyalakan lagi.
-
-`Win + R` → `SystemPropertiesProtection` → pilih C: → **Configure** →
-**Disable system protection**.
-
-> Nyalakan kembali setelah selesai. Kalau tidak, kamu kehilangan kemampuan
-> rollback driver Windows.
-
-### e. Pastikan pagefile tidak menghalangi
-
-Cek ukurannya:
+Satu hal yang hanya ada di sini — **pagefile bisa memblokir shrink**:
 
 ```powershell
 Get-CimInstance Win32_PageFileUsage | Select-Object Name,AllocatedBaseSize
 ```
 
-Kalau besar (>4 GB) dan menghalangi shrink, pindahkan sementara ke "No paging
-file", reboot, shrink, lalu kembalikan.
+Kalau ukurannya besar (>4 GB) dan shrink mentok, pindahkan sementara ke
+"No paging file" → reboot → shrink → kembalikan. Jangan biarkan permanen; Windows
+butuh pagefile.
 
 ---
 

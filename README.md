@@ -29,7 +29,7 @@ Sudah dicek langsung dari Windows:
 |---|---|---|
 | Disk | 1× SAMSUNG MZVL8512HELU, 477 GB, NVMe SSD, GPT | **Satu-satunya disk.** Windows pakai semua |
 | Partisi | EFI **260 MB**, MSR 16 MB, C: 475 GB, Recovery 1 GB + 200 MB | Skema standar Windows 11 |
-| Free space C: | **50.6 GB** | Cukup, tapi tidak lega |
+| Free space C: | **50.6 GB** | Bisa jadi ~87 GB setelah dibersihkan (§0.5b) |
 | ESP Windows | **260 MB** | **Terlalu kecil** — lihat poin 2 |
 | RAM | 16 GB (2×8 GB DDR5 5600) | Slot penuh, tidak bisa upgrade tanpa buang |
 | GPU | AMD Radeon iGPU + NVIDIA RTX 2050 | **Hybrid graphics — ini risiko utama** |
@@ -44,9 +44,11 @@ Konsekuensi yang harus kamu terima sebelum mulai:
    di-resize in-place. Solusinya: buat `/boot` sendiri sebagai ESP kedua, jangan
    sentuh ESP Windows. Ini juga mencegah Windows Update merusak bootloader Linux.
    Detail di [01-cachyos.md §1.1](docs/01-cachyos.md#11-masalah-utama-esp-260-mb).
-3. **50.6 GB free space itu mepet.** Target shrink 50 GB, tapi Windows mungkin
-   hanya mengizinkan 40–45 GB. Bersihkan dulu sebelum shrink — caranya di
-   [01-cachyos.md §1.4](docs/01-cachyos.md#14-membersihkan-windows-dulu-disarankan).
+3. **50.6 GB free space itu mepet — tapi bisa dibebaskan.** Hasil scan rekursif:
+   `Documents` 25.8 GB (didominasi `Plant Ai EVe` 14.9 GB), `Downloads` 17.1 GB,
+   `Videos` 6.8 GB. Sekitar **36 GB aman dibebaskan**, jadi free space bisa naik
+   ke **~87 GB**. Caranya di
+   [00-persiapan.md §0.5b](docs/00-persiapan.md#05b-membersihkan-windows-kalau-shrink-kurang).
 4. **Laptop ini punya satu slot M.2** menurut spesifikasi seri FA506. Jadi "beli SSD
    kedua" bukan opsi simpel — cek dulu fisiknya sebelum berasumsi.
 
