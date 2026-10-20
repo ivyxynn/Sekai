@@ -1,253 +1,491 @@
-# 01 — Install CachyOS
+# 01 — Install CachyOS (dual boot dengan Windows 11)
 
-Tujuan halaman ini: CachyOS terpasang, bisa boot, bisa login ke TTY, **belum ada
-desktop apa pun**. Itu memang yang kita mau.
+Target halaman ini: CachyOS terpasang **berdampingan** dengan Windows 11, Windows
+tetap utuh dan bisa di-boot, dan CachyOS login ke TTY tanpa desktop.
 
 ---
 
-## Kenapa "No Desktop", bukan Hyprland edition
+## 1.0 Kondisi disk kamu (dicek langsung)
 
-Ini keputusan paling penting di seluruh runbook, jadi alasannya lengkap.
+Ini bukan asumsi. Dibaca dari Windows sebelum runbook ditulis:
 
-CachyOS punya opsi **Hyprland** di installer. Itu bukan Hyprland kosong — itu
-Hyprland **plus dots CachyOS bernama Noctalia**. Kalau kamu pilih itu:
+```
+Disk 0: SAMSUNG MZVL8512HELU  —  477 GB  —  NVMe SSD  —  GPT
+├─ p1  System (EFI)    260 MB   ← Windows Boot Manager ada di sini
+├─ p2  Reserved (MSR)   16 MB
+├─ p3  C: NTFS        475.5 GB   ← free 50.6 GB
+├─ p4  Recovery          1 GB
+└─ p5  Recovery        200 MB
+```
 
-| Yang terjadi | Akibat |
+Dua angka yang menentukan segalanya:
+
+| Angka | Nilai | Konsekuensi |
+|---|---|---|
+| Free space C: | **50.6 GB** | Cukup, tapi tidak lega |
+| ESP Windows | **260 MB** | **Terlalu kecil** untuk CachyOS |
+
+---
+
+## 1.1 Masalah utama: ESP 260 MB
+
+Ini jebakan yang bikin banyak orang gagal, dan hampir tidak pernah dijelaskan.
+
+CachyOS minta `/boot` **minimal 4 GB** (untuk Limine) atau 2 GB (systemd-boot).
+ESP Windows kamu cuma **260 MB** dan sudah dipakai Windows Boot Manager.
+
+Kalau kamu mount ESP 260 MB itu sebagai `/boot`, hasilnya:
+
+- Kernel + initramfs + microcode + driver NVIDIA DKMS **tidak muat**
+- Update kernel gagal di tengah jalan
+- Sistem **tidak bisa boot** setelah update pertama
+
+Dan kamu **tidak bisa memperbesar** partisi FAT32 di tempat. Dokumentasi CachyOS
+menyebutnya sendiri:
+
+> *"FAT filesystems cannot be resized in-place. To properly 'resize' the FAT EFI
+> partition, one must back up the existing EFI filesystem, use a tool such as
+> gparted to resize the existing partition and reformat the new partition, then
+> copy the previous filesystem structure back into the EFI partition."*
+
+Itu berisiko dan tidak perlu.
+
+### Solusinya: `/boot` sendiri, ESP Windows tidak disentuh
+
+```
+Disk 0
+├─ p1  EFI Windows    260 MB   ← JANGAN DISENTUH
+├─ p2  MSR             16 MB   ← JANGAN DISENTUH
+├─ p3  C: NTFS       475 GB    ← di-shrink
+├─ p4  Recovery         1 GB   ← JANGAN DISENTUH
+├─ p5  Recovery       200 MB   ← JANGAN DISENTUH
+├─ p6  /boot FAT32      4 GB   ← BARU, jadi ESP Linux
+└─ p7  / btrfs        sisa     ← BARU
+```
+
+Ini legal di UEFI: satu disk **boleh** punya lebih dari satu ESP. Firmware akan
+melihat dua entri boot, dan itu memang yang kita mau.
+
+Keuntungan tambahan yang besar: karena ESP Linux terpisah, **Windows Update tidak
+bisa merusak bootloader Linux** dengan menimpa ESP. Ini penyebab paling umum
+dual-boot rusak, dan kita menghindarinya secara struktural — bukan dengan doa.
+
+---
+
+## 1.2 Pilih bootloader: **Limine**
+
+CachyOS menawarkan empat. Untuk kasus kamu, pilihannya jelas:
+
+| Bootloader | `/boot` yang diminta | Cocok di sini? |
+|---|---|---|
+| **Limine** | FAT32 **4 GB**, mount `/boot` | ✅ **Pilih ini** |
+| systemd-boot | FAT32 2 GB, mount `/boot` | ⚠️ Bisa, tapi harus copy binary Windows manual |
+| GRUB | mount `/boot/efi` → **pakai ESP 260 MB** | ❌ ESP terlalu kecil, dan menulis ke ESP Windows |
+| rEFInd | FAT32 2 GB | ⚠️ Bisa, tapi lebih ribet dari Limine |
+
+Kenapa Limine:
+
+- `/boot` sendiri 4 GB → tidak menyentuh ESP Windows
+- Windows terdeteksi otomatis; kalau tidak, ada `limine-scan`
+- Btrfs snapshot integration aktif by default di CachyOS
+- Ini bootloader default CachyOS, jadi paling banyak teruji di distro ini
+
+> **Kalau kamu pilih GRUB**, dia akan memasang dirinya ke ESP 260 MB milik
+> Windows. Secara teori bisa (GRUB butuh ~50 MB), tapi kamu menaruh bootloader
+> Linux di partisi yang dipakai Windows Update. Hindari.
+
+---
+
+## 1.3 Berapa besar yang harus di-shrink
+
+Rekomendasi resmi CachyOS: minimal 30 GB untuk CachyOS saja. Tambah kebutuhan
+kita:
+
+| Komponen | Ukuran |
 |---|---|
-| `~/.config/hypr/config/*.lua` terisi dots CachyOS | SekaiPop `--hypr full` akan **memindahkan seluruh folder ini** |
-| `autostart.lua` menjalankan `noctalia` | Dua shell jalan bersamaan, saling tabrakan layer |
-| Sesi login default = **Hyprland (UWSM)** | SekaiPop butuh sesi plain Hyprland, bukan uwsm |
-| `~/.config/uwsm/env` dipakai untuk env var | `sekaipop_session.lua` justru menulis `hl.env()` di config Hyprland |
+| `/boot` (Limine) | 4 GB |
+| CachyOS base + kernel | ~10 GB |
+| Hyprland + Qt6 + Quickshell | ~4 GB |
+| Paket SekaiPop | ~3 GB |
+| Font, theme, cache | ~2 GB |
+| Ruang kerja + update kernel | ~6 GB |
+| **Total** | **~29 GB** |
 
-Semua itu bisa dibereskan satu per satu, tapi kamu akan menghabiskan waktu
-mendebug konflik yang tidak perlu. Mulai dari kosong jauh lebih cepat.
+**Target: shrink 50 GB.** Dengan 50 GB kamu dapat 4 GB `/boot` + 46 GB root, dan
+sekitar 17 GB sisa lega. Itu cukup nyaman.
 
-SekaiPop sendiri didesain untuk ini — `install.sh`-nya menulis di komentarnya:
-*"turns a minimal Hyprland system into the complete desktop"*.
+Tapi free space kamu cuma 50.6 GB, dan Windows tidak akan membiarkan kamu shrink
+sampai habis — ada file yang tidak bisa dipindah (pagefile, System Restore,
+file yang sedang dipakai). Realistisnya kamu mungkin hanya bisa shrink
+**40–45 GB**.
 
-> **Kalau kamu tetap mau Hyprland edition** karena ingin ada desktop cadangan:
-> pilih itu, lalu **wajib** pakai `--hypr merge` (bukan `full`), dan hapus baris
-> `hl.exec_cmd("noctalia")` dari `~/.config/hypr/config/autostart.lua` sebelum
-> login. Detailnya di [03-sekaipop.md](03-sekaipop.md).
+Kalau begitu, dua pilihan:
 
----
-
-## 1.1 Boot dari USB
-
-1. Colok USB, restart laptop
-2. Tekan **Esc** berulang saat logo ASUS untuk membuka boot menu
-   (atau **F8**; kalau tidak muncul, masuk BIOS dengan **F2** → Boot → pilih USB)
-3. Pilih USB-nya. Kalau ada dua entri, pilih yang **UEFI**
-4. Tunggu sampai desktop live muncul
-
-Di desktop live ada tombol **Launch Installer**. Klik itu.
+1. **Bersihkan Windows dulu** (lihat 1.4), lalu shrink lebih besar
+2. **Terima 45 GB**: 4 GB `/boot` + 41 GB root, sisa ~12 GB. Bisa jalan, tapi
+   kamu akan sering kehabisan ruang saat update besar
 
 ---
 
-## 1.2 Wizard installer
+## 1.4 Membersihkan Windows dulu (disarankan)
 
-Ikuti urutan Calamares. Yang penting hanya beberapa layar:
+Sebelum shrink, bebaskan ruang. Yang paling besar hasilnya:
 
-### Language & Region
-Pilih English (US) untuk bahasa installer. Untuk region, pilih **Asia/Jakarta**
-kalau kamu mau zona waktu WIB.
+### a. Disk Cleanup sistem
 
-### Keyboard
-`us` — default. Kalau keyboard laptop kamu layout Indonesia, tetap pilih `us`
-kecuali kamu yakin butuh yang lain.
+```powershell
+cleanmgr /sageset:1
+```
 
-### Partisi — **bagian paling berbahaya**
+Centang semua, terutama **Windows Update Cleanup**, **Previous Windows
+installation(s)**, **Delivery Optimization Files**. Lalu:
+
+```powershell
+cleanmgr /sagerun:1
+```
+
+### b. Cek file besar
+
+```powershell
+Get-ChildItem C:\Users\Asus -Recurse -File -ErrorAction SilentlyContinue |
+  Sort-Object Length -Descending | Select-Object -First 25 |
+  Select-Object @{n='GB';e={[math]::Round($_.Length/1GB,2)}},FullName
+```
+
+### c. Pindahkan yang memang bisa pindah
+
+- `C:\Users\Asus\Documents` — ini isi tugas kuliah, banyak yang bisa ke drive
+  eksternal
+- Folder `Downloads`, `Videos`, `Pictures` yang besar
+- Cache aplikasi (browser, Discord, game launcher)
+
+### d. Matikan System Restore sementara
+
+System Restore menyimpan `System Volume Information` yang tidak bisa dipindah
+dan **memblokir shrink**. Matikan sementara, shrink, lalu nyalakan lagi.
+
+`Win + R` → `SystemPropertiesProtection` → pilih C: → **Configure** →
+**Disable system protection**.
+
+> Nyalakan kembali setelah selesai. Kalau tidak, kamu kehilangan kemampuan
+> rollback driver Windows.
+
+### e. Pastikan pagefile tidak menghalangi
+
+Cek ukurannya:
+
+```powershell
+Get-CimInstance Win32_PageFileUsage | Select-Object Name,AllocatedBaseSize
+```
+
+Kalau besar (>4 GB) dan menghalangi shrink, pindahkan sementara ke "No paging
+file", reboot, shrink, lalu kembalikan.
+
+---
+
+## 1.5 Shrink partisi C:
+
+`Win + R` → `diskmgmt.msc`
+
+1. Klik kanan **C:** → **Shrink Volume...**
+2. Tunggu Windows menghitung (bisa 1–2 menit)
+3. Lihat **"Size of available shrink space in MB"**
+
+| Nilai yang muncul | Lakukan |
+|---|---|
+| ≥ 51200 (50 GB) | Isi `51200`, lanjut |
+| 40960–51199 (40–50 GB) | Isi angka maksimum, **catat** berapa |
+| < 40960 | Batal, bersihkan dulu (1.4), ulangi |
+
+4. Klik **Shrink**
+
+Hasilnya: **unallocated space** di akhir disk. **Jangan diformat. Jangan dibuat
+partisi baru.** Calamares yang akan memakainya.
+
+---
+
+## 1.6 Boot dari USB dan mulai installer
+
+1. Restart, tekan **Esc** berulang untuk boot menu (atau **F2** → Boot)
+2. Pilih USB, pastikan yang **UEFI**
+3. Di desktop live, klik **Launch Installer**
+4. Language: English. Region: **Asia/Jakarta**
+5. Keyboard: `us`
+
+### Verifikasi mode UEFI — jangan dilewati
+
+Buka terminal di live session:
+
+```bash
+efibootmgr -v
+```
+
+- Muncul daftar entri → **UEFI, benar**
+- Muncul `EFI variables are not supported on this system` → **kamu boot Legacy**
+
+Kalau Legacy, restart dan pilih entri USB yang UEFI. Kalau tetap Legacy, matikan
+**CSM** di BIOS. Dokumentasi CachyOS: *"If you only get GRUB and Limine as boot
+manager options, the system is booted in Legacy/BIOS mode."*
+
+---
+
+## 1.7 Partisi manual — bagian paling berbahaya
 
 Pilih **Manual partitioning**.
 
-> **Jangan pilih "Erase disk".** Di mesin ini hanya ada satu disk berisi Windows.
-> Erase disk akan menghapus Windows beserta semua data.
+> ⚠️ **Jangan pilih "Install alongside" atau "Replace partition".**
+> Dokumentasi CachyOS menyebut keduanya *"not 100% reliable and can cause the
+> installation to fail"*, dan `Replace partition` bisa menghapus Windows.
 
-Yang harus dibuat:
+Kamu akan melihat daftar partisi. Yang **tidak boleh disentuh**:
 
-| Ukuran | Filesystem | Mount point | Flag |
-|---|---|---|---|
-| 4096 MiB | FAT32 | `/boot` | `boot` |
-| sisa unallocated | btrfs (atau ext4) | `/` | — |
+| Partisi | Ukuran | Isi |
+|---|---|---|
+| `nvme0n1p1` | 260 MB | EFI Windows |
+| `nvme0n1p2` | 16 MB | MSR |
+| `nvme0n1p3` | 475 GB | Windows C: |
+| `nvme0n1p4` | 1 GB | Recovery |
+| `nvme0n1p5` | 200 MB | Recovery |
 
-**Jangan sentuh** partisi yang sudah ada:
+**Aturan: jangan pernah klik Delete atau Format pada lima partisi di atas.**
 
-- `System` / EFI 300 MB — punya Windows, jangan diformat
-- `Reserved` / MSR 16 MB
-- `C:` 475 GB — Windows
-- `Recovery` ×2
+Sekarang buat dua partisi baru di **free space**:
 
-Cara aman: klik **unallocated space** → **Create** → isi seperti tabel di atas.
-Jangan pernah klik **Delete** pada partisi yang sudah ada.
+### Partisi 1 — `/boot`
 
-> **Soal `/boot` terpisah 4 GB.** Ini rekomendasi CachyOS dan masuk akal di
-> laptop hybrid: kernel + initramfs + microcode + driver NVIDIA DKMS bisa cepat
-> membesar. Kalau `/boot` terlalu kecil, update kernel akan gagal dan sistem
-> tidak bisa boot. 4 GB memberi ruang lega.
+Klik **free space** → **Create**:
+
+| Field | Isi |
+|---|---|
+| Size | `4096` MiB |
+| File system | `fat32` |
+| Mount point | `/boot` |
+| Flags | `boot` |
+
+### Partisi 2 — `/`
+
+Klik **free space** yang tersisa → **Create**:
+
+| Field | Isi |
+|---|---|
+| Size | sisanya (biarkan default) |
+| File system | `btrfs` |
+| Mount point | `/` |
+| Flags | — |
+
+> **Kenapa btrfs?** Karena CachyOS mengaktifkan `limine-snapper-sync` untuk
+> btrfs secara default. Artinya kamu dapat snapshot otomatis sebelum update, dan
+> bisa boot ke snapshot lama kalau update merusak sistem. Di distro yang sedang
+> kamu bangun, ini penyelamat.
+
+### Bootloader
+
+Di bagian **Boot loader location** (atau **Install boot loader on**):
+
+- Pilih **Limine**
+- Target: **disk** `nvme0n1` (bukan partisi tertentu)
+
+---
+
+## 1.8 Sisa wizard
 
 ### Desktop Environment — **pilih "No Desktop"**
 
-Ini intinya. Di daftar desktop, scroll ke paling atas dan pilih **No Desktop**.
-
-Deskripsinya sendiri bilang: *"your system will start up in text-only mode and you
-can install a desktop environment later"* — persis yang kita mau.
+Scroll ke paling atas, pilih **No Desktop**. Alasannya lengkap di
+[03-sekaipop.md](03-sekaipop.md#31-kenapa-setup-kita-justru-menghindari-masalah-terbesar),
+ringkasnya: kalau pilih Hyprland edition, kamu dapat Noctalia + uwsm yang bentrok
+dengan SekaiPop.
 
 ### Packages
-Biarkan default. Jangan centang apa pun yang tidak kamu paham.
+Biarkan default. Jangan centang yang tidak kamu paham.
 
 ### Users
-- Nama lengkap, username (huruf kecil, tanpa spasi)
-- **Password wajib diisi** — akun tanpa password akan menyulitkan `sudo`
-- Centang **"Log in automatically"**? **Jangan.** Kalau shell rusak, kamu butuh
-  TTY untuk memperbaikinya.
-- **"Use the same password for the administrator account"** — biarkan tercentang
+- Username huruf kecil, tanpa spasi
+- **Password wajib diisi**
+- **Jangan** centang "Log in automatically" — kalau shell rusak, kamu butuh TTY
+- Centang "Use the same password for the administrator account"
 
-### Bootloader
-Pilih **Limine** (default CachyOS) atau **systemd-boot**. Keduanya bisa
-mendeteksi Windows.
+### Review — baca sebelum klik Install
 
-> Kalau setelah install Windows tidak muncul di menu boot, dari CachyOS jalankan
-> `sudo limine-scan` (untuk Limine) atau `sudo bootctl list` untuk memeriksa.
+Pastikan:
 
-### Review
-Baca ringkasannya. Pastikan:
-- Tidak ada partisi Windows yang ditandai akan diformat
-- Desktop = No Desktop
-- Bootloader terpasang ke disk yang benar
+- [ ] Tidak ada partisi Windows yang ditandai akan **diformat**
+- [ ] Ada partisi baru 4 GB FAT32 → `/boot`
+- [ ] Ada partisi baru btrfs → `/`
+- [ ] Bootloader = Limine, target disk `nvme0n1`
+- [ ] Desktop = No Desktop
 
 Baru klik **Install Now**.
 
 ---
 
-## 1.3 Boot pertama
+## 1.9 Boot pertama setelah install
 
-Setelah selesai, lepas USB, restart.
+Lepas USB, restart. Kamu akan melihat **menu Limine** dengan pilihan CachyOS.
 
-Kamu akan melihat menu boot dengan pilihan CachyOS dan Windows. Pilih CachyOS.
+### Kalau Windows tidak muncul di menu
 
-Yang muncul adalah **login TTY** — layar hitam dengan teks. Ini **normal dan
-benar**. Tidak ada desktop karena kita memang tidak memasangnya.
-
-Login dengan username dan password yang kamu buat tadi.
-
----
-
-## 1.4 Verifikasi dasar
-
-Sebelum lanjut, pastikan sistemnya sehat:
+Boot ke CachyOS (login TTY), lalu:
 
 ```bash
-# Distro apa ini
-cat /etc/os-release | head -3
-
-# Kernel
-uname -r
-
-# Arsitektur CPU (penting untuk repo CachyOS)
-/lib/ld-linux-x86-64.so.2 --help | grep -A5 "Subdirectories of glibc-hwcaps"
-
-# Internet
-ping -c 3 archlinux.org
-
-# Disk
-lsblk -f
-df -h /
+sudo limine-scan
 ```
 
-Yang harus kamu lihat:
+Ini memindai ESP lain dan menambahkan entri Windows. Reboot untuk melihat
+hasilnya.
 
-- `NAME="CachyOS Linux"` (atau serupa)
-- Kernel `linux-cachyos` sesuatu
-- CPU mendukung `x86-64-v3` (Ryzen 5 7535HS = Zen 3+ → **v3, bukan v4**)
-- Ping berhasil
+Verifikasi entri yang ada:
 
-> **Kenapa arsitektur penting.** CachyOS punya repo terpisah per level CPU. Kalau
-> `pacman.conf` menunjuk ke repo v4 padahal CPU-mu v3, paket akan gagal install
-> dengan error "invalid or corrupted package". Ini biasanya sudah benar otomatis,
-> tapi bagus untuk dicek.
+```bash
+sudo limine-entry-tool --list 2>/dev/null || ls /boot/limine/
+```
+
+### Kalau Windows masih tidak muncul
+
+Cek apakah Windows Boot Manager benar-benar ada di ESP 260 MB:
+
+```bash
+lsblk -f
+sudo mkdir -p /mnt/winboot
+sudo mount /dev/nvme0n1p1 /mnt/winboot
+ls /mnt/winboot/EFI/Microsoft/Boot/bootmgfw.efi
+sudo umount /mnt/winboot
+```
+
+Kalau file `bootmgfw.efi` **ada**, Windows sehat — tinggal tambahkan entri
+manual. Kalau **tidak ada**, Windows-nya bermasalah (bukan CachyOS).
+
+### Set urutan boot supaya Limine jadi default
+
+```bash
+efibootmgr
+```
+
+Cari entri `Limine` (atau `CachyOS`), lihat nomornya, lalu:
+
+```bash
+sudo efibootmgr -o 0001,0000
+```
+
+(Ganti `0001` dengan nomor Limine, `0000` dengan Windows.)
+
+Biasanya ini tidak perlu — installer sudah mengaturnya. Tapi kalau laptop boot
+langsung ke Windows, ini perbaikannya.
 
 ---
 
-## 1.5 Update sistem penuh
+## 1.10 Windows Update bisa merusak boot — dan cara mengatasinya
 
-Sebelum install apa pun:
+Ini risiko nyata yang disebut dokumentasi CachyOS sendiri:
+
+> *"Windows updates can break the bootloader by overwriting the EFI partition.
+> In some cases, issues might never occur, but for some users it can be a
+> recurring problem."*
+
+Setup kita **sudah mengurangi risiko ini** karena `/boot` Linux ada di partisi
+terpisah — Windows Update tidak menulis ke sana.
+
+Tapi Windows masih bisa mengubah **urutan boot di NVRAM**, sehingga laptop
+langsung masuk Windows.
+
+### Kalau terjadi
+
+Boot ke CachyOS (lewat BIOS boot menu, tekan **Esc**/F8 saat start), lalu:
+
+```bash
+sudo efibootmgr -o 0001,0000
+```
+
+### Kalau Limine hilang sama sekali dari NVRAM
+
+```bash
+# Cari tahu di mana limine.efi
+sudo find /boot -name '*.efi' 2>/dev/null
+lsblk -f
+
+# Daftarkan ulang
+sudo efibootmgr --create --disk /dev/nvme0n1 --part 6 \
+  --label "Limine" --loader '\EFI\limine\limine_x64.efi'
+```
+
+(Sesuaikan nomor partisi `6` dengan partisi `/boot` kamu — cek `lsblk`.)
+
+---
+
+## 1.11 Verifikasi setelah boot
+
+```bash
+# Distro
+cat /etc/os-release | head -3
+
+# Windows masih ada?
+lsblk -f
+sudo blkid | grep -i ntfs
+
+# Bootloader melihat Windows?
+sudo limine-entry-tool --list 2>/dev/null
+
+# Mount point benar?
+findmnt /boot
+findmnt /
+
+# Arsitektur CPU (Ryzen 5 7535HS = v3, bukan v4)
+/lib/ld-linux-x86-64.so.2 --help | grep -A5 hwcaps
+```
+
+Yang harus terlihat:
+
+- `/boot` = partisi 4 GB FAT32 yang baru
+- `/` = btrfs
+- Partisi NTFS Windows masih ada, ukurannya tidak berubah
+- CPU mendukung `x86-64-v3`
+
+---
+
+## 1.12 Update sistem
 
 ```bash
 sudo pacman -Syu
-```
-
-Kalau ada pertanyaan konfirmasi, jawab `y`. Kalau muncul konflik paket, **berhenti
-dan baca** — jangan paksa dengan `--overwrite`.
-
-Setelah selesai, reboot:
-
-```bash
 sudo reboot
 ```
 
-Login lagi setelah reboot.
+Setelah reboot, **tes boot ke Windows sekali** sebelum lanjut ke driver GPU.
+Lebih baik tahu sekarang kalau ada yang salah, daripada setelah kamu
+menginvestasikan berjam-jam di CachyOS.
 
 ---
 
-## 1.6 Pasang alat dasar
+## 1.13 Kalau mau membatalkan dual boot
 
-CachyOS minimal biasanya sudah punya ini, tapi pastikan:
+Hapus CachyOS dan kembalikan ruang ke Windows:
 
-```bash
-sudo pacman -S --needed base-devel git curl wget nano sudo
-```
+1. Boot USB CachyOS (live session)
+2. Buka `gparted` atau `sudo cfdisk /dev/nvme0n1`
+3. Hapus partisi `/boot` dan `/` (p6 dan p7)
+4. **Jangan** sentuh p1–p5
+5. Boot Windows → `diskmgmt.msc` → klik kanan C: → **Extend Volume**
+6. Hapus entri Limine dari NVRAM:
+   ```bash
+   sudo efibootmgr -b 0001 -B
+   ```
 
-- `base-devel` — wajib untuk build paket AUR
-- `git` — SekaiPop di-clone dari GitHub
-- `nano` — editor sederhana untuk memperbaiki config kalau ada yang rusak
-
-Cek AUR helper:
-
-```bash
-command -v paru yay
-```
-
-CachyOS versi baru **tidak lagi** memasang `paru` secara default (dihapus dari
-installer). Kalau kosong, install nanti — installer SekaiPop bisa membangun
-`yay-bin` sendiri, tapi lebih rapi kalau kamu siapkan sekarang:
-
-```bash
-sudo pacman -S --needed paru
-```
-
-Kalau `paru` tidak ada di repo, lewati saja — installer SekaiPop akan menanganinya.
-
----
-
-## 1.7 Cek hardware dikenali
-
-```bash
-# GPU
-lspci -nn | grep -Ei 'vga|3d|display'
-
-# Cari dua entri: AMD (1002:...) dan NVIDIA (10de:...)
-```
-
-Di laptop ini kamu harus melihat **dua** GPU:
-
-```
-AMD Radeon Graphics [1002:...]
-NVIDIA GeForce RTX 2050 [10de:...]
-```
-
-Kalau hanya satu yang muncul, atau tidak ada sama sekali, **jangan lanjut** —
-perbaiki dulu di [02-driver-gpu.md](02-driver-gpu.md).
+Windows akan kembali seperti semula. Data Windows tidak pernah tersentuh selama
+kamu tidak memformat p3.
 
 ---
 
 ## Checklist
 
-- [ ] CachyOS boot ke TTY, bisa login
-- [ ] Windows masih ada di menu boot
+- [ ] Data penting sudah di drive eksternal
+- [ ] BitLocker: `Fully Decrypted`
+- [ ] `powercfg /H off` sudah dijalankan + reboot
+- [ ] Unallocated space ≥ 40 GB
+- [ ] `efibootmgr -v` di live session berjalan (artinya UEFI)
+- [ ] Partisi baru: 4 GB FAT32 → `/boot`, sisa → `/` btrfs
+- [ ] Bootloader: **Limine**, target disk `nvme0n1`
+- [ ] Desktop: **No Desktop**
+- [ ] Menu Limine menampilkan CachyOS **dan** Windows
+- [ ] Sudah tes boot ke Windows sekali
 - [ ] `sudo pacman -Syu` selesai tanpa error
-- [ ] Sudah reboot setelah update
-- [ ] `lspci` menunjukkan **dua** GPU (AMD + NVIDIA)
-- [ ] Internet jalan
-- [ ] `base-devel` dan `git` terpasang
 
 Lanjut ke [02-driver-gpu.md](02-driver-gpu.md) — **jangan lewati ini.**
