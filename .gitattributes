@@ -1,0 +1,16 @@
+# Script shell WAJIB LF. Kalau ke-checkout CRLF di Linux, hasilnya
+# "bad interpreter: /usr/bin/env bash^M" dan script tidak bisa jalan.
+*.sh    text eol=lf
+*.bash  text eol=lf
+
+# Markdown & config: LF juga, biar konsisten lintas OS.
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+*.lua   text eol=lf
+
+# Binary
+*.png   binary
+*.jpg   binary
+*.svg   text eol=lf
