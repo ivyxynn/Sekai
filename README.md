@@ -27,9 +27,10 @@ Sudah dicek langsung dari Windows:
 
 | Item | Nilai | Arti |
 |---|---|---|
-| Disk | 1× SAMSUNG MZVL8512HELU, 477 GB, GPT | **Satu-satunya disk.** Windows pakai semua |
-| Partisi | EFI 0.3 GB, MSR, C: 475 GB, Recovery ×2 | Skema standar Windows 11 |
-| Free space C: | **51 GB** | Cukup untuk dual-boot, mepet |
+| Disk | 1× SAMSUNG MZVL8512HELU, 477 GB, NVMe SSD, GPT | **Satu-satunya disk.** Windows pakai semua |
+| Partisi | EFI **260 MB**, MSR 16 MB, C: 475 GB, Recovery 1 GB + 200 MB | Skema standar Windows 11 |
+| Free space C: | **50.6 GB** | Cukup, tapi tidak lega |
+| ESP Windows | **260 MB** | **Terlalu kecil** — lihat poin 2 |
 | RAM | 16 GB (2×8 GB DDR5 5600) | Slot penuh, tidak bisa upgrade tanpa buang |
 | GPU | AMD Radeon iGPU + NVIDIA RTX 2050 | **Hybrid graphics — ini risiko utama** |
 | Model | ASUS TUF Gaming A15 FA506NF | Laptop, bukan desktop |
@@ -39,10 +40,14 @@ Konsekuensi yang harus kamu terima sebelum mulai:
 1. **Hybrid graphics adalah sumber masalah paling sering**, bukan installer-nya.
    SekaiPop secara eksplisit *tidak menyentuh* driver GPU. Kalau driver belum benar,
    yang rusak adalah Hyprland, dan kamu akan salah menyalahkan SekaiPop.
-2. **51 GB free space itu mepet.** Dual-boot butuh minimal 30 GB, dan itu sudah
-   termasuk sesak untuk Arch + Qt6 + semua paket SekaiPop. Lihat
-   [01-cachyos.md](docs/01-cachyos.md) untuk pilihan yang lebih aman.
-3. **Laptop ini punya satu slot M.2** menurut spesifikasi seri FA506. Jadi "beli SSD
+2. **ESP Windows cuma 260 MB, CachyOS butuh `/boot` 4 GB.** FAT32 tidak bisa
+   di-resize in-place. Solusinya: buat `/boot` sendiri sebagai ESP kedua, jangan
+   sentuh ESP Windows. Ini juga mencegah Windows Update merusak bootloader Linux.
+   Detail di [01-cachyos.md §1.1](docs/01-cachyos.md#11-masalah-utama-esp-260-mb).
+3. **50.6 GB free space itu mepet.** Target shrink 50 GB, tapi Windows mungkin
+   hanya mengizinkan 40–45 GB. Bersihkan dulu sebelum shrink — caranya di
+   [01-cachyos.md §1.4](docs/01-cachyos.md#14-membersihkan-windows-dulu-disarankan).
+4. **Laptop ini punya satu slot M.2** menurut spesifikasi seri FA506. Jadi "beli SSD
    kedua" bukan opsi simpel — cek dulu fisiknya sebelum berasumsi.
 
 ---
@@ -54,10 +59,13 @@ Jangan lompat. Nomor 2 dan 3 adalah tempat 90% kegagalan terjadi.
 | # | Langkah | File | Kalau dilewati |
 |---|---|---|---|
 | 1 | Siapkan Windows (BitLocker, Fast Startup, backup) | [docs/00-persiapan.md](docs/00-persiapan.md) | Kehilangan data / Windows tidak bisa boot |
-| 2 | Install CachyOS (pilih **No Desktop**) | [docs/01-cachyos.md](docs/01-cachyos.md) | Konflik Noctalia & uwsm, harus ulang |
+| 2 | **Dual boot**: partisi + install CachyOS (No Desktop) | [docs/01-cachyos.md](docs/01-cachyos.md) | Windows tertimpa / ESP penuh, sistem tidak bisa boot |
 | 3 | Driver GPU hybrid (AMD + NVIDIA) | [docs/02-driver-gpu.md](docs/02-driver-gpu.md) | Layar hitam, Hyprland crash, shell tidak muncul |
 | 4 | Install SekaiPop | [docs/03-sekaipop.md](docs/03-sekaipop.md) | — |
 | 5 | Kalau ada yang rusak | [docs/04-troubleshooting.md](docs/04-troubleshooting.md) | Panik tanpa jalan pulang |
+
+Setelah selesai, tiap kali nyalakan laptop kamu akan lihat menu **Limine** dengan
+pilihan CachyOS dan Windows 11.
 
 ---
 

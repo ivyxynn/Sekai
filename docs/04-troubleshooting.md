@@ -30,6 +30,8 @@ lihat apakah kamu masih bisa pindah TTY.
 | Gejala | Lapisan | Mulai dari |
 |---|---|---|
 | Tidak bisa boot sama sekali, tidak ada menu | 1 | [4.2](#42-tidak-bisa-boot) |
+| Windows hilang dari menu Limine | boot | [4.2](#windows-hilang-dari-menu-limine) |
+| Langsung masuk Windows, menu Limine tidak muncul | boot | [4.2](#laptop-langsung-masuk-windows-menu-limine-tidak-muncul) |
 | Boot sampai TTY, tapi `Hyprland` langsung mati | 2–3 | [4.3](#43-hyprland-gagal-start) |
 | Hyprland jalan, layar hitam + kursor | 3–4 | [4.4](#44-layar-hitam-tapi-ada-kursor) |
 | Desktop muncul, tapi tidak ada bar/widget | 4 | [4.5](#45-shell-tidak-muncul) |
@@ -51,34 +53,95 @@ bisa, masalahnya di lapisan 1.
 Boot USB CachyOS, pilih **live session** (jangan installer), buka terminal.
 
 ```bash
-# Lihat partisi
+# Lihat partisi — catat nomornya
 lsblk -f
+```
 
-# Pasang root kamu (sesuaikan, biasanya partisi terbesar)
-sudo mount /dev/nvme0n1pX /mnt
+Layout hasil runbook ini:
 
-# Kalau /boot terpisah
-sudo mount /dev/nvme0n1pY /mnt/boot
+```
+nvme0n1p1  vfat   260M            ← ESP Windows, JANGAN di-mount ke /mnt/boot
+nvme0n1p3  ntfs   475G            ← Windows C:
+nvme0n1p6  vfat     4G            ← /boot Linux  (ESP kedua)
+nvme0n1p7  btrfs  ~45G            ← / Linux
+```
 
-# Kalau EFI terpisah
-sudo mount /dev/nvme0n1p1 /mnt/boot/efi
+```bash
+# Root
+sudo mount /dev/nvme0n1p7 /mnt
+
+# /boot — ini ESP Linux, BUKAN partisi Windows
+sudo mount /dev/nvme0n1p6 /mnt/boot
 
 # Masuk
 sudo arch-chroot /mnt
 ```
+
+> **Jangan mount `nvme0n1p1` ke `/mnt/boot`.** Itu ESP Windows. Kalau kamu mount
+> di sana lalu menjalankan `limine-update` atau `mkinitcpio`, kamu menulis
+> kernel Linux ke partisi boot Windows. Kerusakan yang dihasilkan tidak langsung
+> terlihat, tapi bisa membuat Windows gagal boot.
 
 Sekarang kamu di sistem asli. Perbaiki dari sini.
 
 ### Bootloader rusak
 
 ```bash
-# Limine
+# Limine — regenerasi entri
 sudo limine-update
-sudo limine-scan          # cari Windows juga
+
+# Cari Windows kalau entri-nya hilang
+sudo limine-scan
 
 # systemd-boot
 sudo bootctl install
 sudo bootctl update
+```
+
+### Windows hilang dari menu Limine
+
+Ini kejadian paling umum setelah Windows Update besar.
+
+```bash
+sudo limine-scan
+```
+
+Kalau tidak membantu, cek Windows Boot Manager masih ada:
+
+```bash
+sudo mkdir -p /mnt/winboot
+sudo mount /dev/nvme0n1p1 /mnt/winboot
+ls /mnt/winboot/EFI/Microsoft/Boot/bootmgfw.efi
+sudo umount /mnt/winboot
+```
+
+- File **ada** → Windows sehat, tinggal daftarkan ulang entrinya
+- File **tidak ada** → Windows-nya bermasalah, perbaiki dari sisi Windows
+  (bootrec / startup repair), bukan dari CachyOS
+
+### Laptop langsung masuk Windows, menu Limine tidak muncul
+
+Windows Update mengubah urutan boot di NVRAM.
+
+```bash
+efibootmgr
+```
+
+Cari entri `Limine` / `CachyOS`, catat nomornya, lalu taruh paling depan:
+
+```bash
+sudo efibootmgr -o 0001,0000
+```
+
+Kalau entri Limine **hilang sama sekali** dari daftar:
+
+```bash
+# Cari file EFI-nya dulu
+sudo find /boot -name '*.efi'
+
+# Daftarkan ulang (sesuaikan nomor partisi /boot kamu)
+sudo efibootmgr --create --disk /dev/nvme0n1 --part 6 \
+  --label "Limine" --loader '\EFI\limine\limine_x64.efi'
 ```
 
 ### Kernel hilang atau rusak
@@ -422,6 +485,26 @@ Sekarang kamu punya Hyprland minimal lagi. Tidak ada paket yang dihapus.
 
 Kalau sistemnya sudah tidak bisa diselamatkan. Windows tetap aman selama kamu
 **tidak** memilih "Erase disk" dan tidak menyentuh partisinya.
+
+Saat install ulang, hapus dulu partisi `/boot` dan `/` yang lama (p6 dan p7) di
+Calamares, biarkan jadi unallocated, lalu buat ulang. **Jangan** sentuh p1–p5.
+
+### Level 4 — hapus CachyOS, kembalikan ke Windows saja
+
+Kalau kamu memutuskan berhenti:
+
+1. Boot USB CachyOS live
+2. Hapus partisi p6 (`/boot`) dan p7 (`/`)
+3. Jangan sentuh p1–p5
+4. Boot Windows → `diskmgmt.msc` → klik kanan **C:** → **Extend Volume**
+5. Hapus entri boot Limine:
+   ```bash
+   efibootmgr              # cari nomor entri Limine
+   sudo efibootmgr -b 0001 -B
+   ```
+
+Windows kembali seperti semula. Data Windows tidak pernah tersentuh selama kamu
+tidak memformat p3.
 
 ---
 

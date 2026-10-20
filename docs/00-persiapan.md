@@ -110,15 +110,57 @@ Shrink lewat Disk Management (`diskmgmt.msc`) — lebih aman karena ada preview:
 
 1. `Win + R` → `diskmgmt.msc`
 2. Klik kanan partisi **C:** → **Shrink Volume**
-3. Isi jumlah MB. Untuk 60 GB: `61440`
-4. **Shrink**
+3. Tunggu Windows menghitung (1–2 menit)
+4. Isi jumlah MB — lihat tabel di bawah
+5. **Shrink**
+
+Target: **50 GB** (`51200` MB). Tapi Windows sering hanya mengizinkan lebih
+kecil, karena ada file yang tidak bisa dipindah (pagefile, System Restore,
+`System Volume Information`).
+
+| Space yang ditawarkan | Lakukan |
+|---|---|
+| ≥ 51200 MB (50 GB) | Isi `51200` |
+| 40960–51199 MB (40–50 GB) | Isi maksimum, **catat angkanya** |
+| < 40960 MB (< 40 GB) | Batal, bersihkan dulu (§0.5b), ulangi |
 
 Sisakan **unallocated space**. Jangan diformat, jangan dibuat partisi baru —
 CachyOS yang akan memakainya.
 
-> Windows kadang menolak shrink kalau ada file yang tidak bisa dipindah
-> (pagefile, hibernation file, restore point). Kalau tombol Shrink abu-abu atau
-> hasilnya 0 MB: matikan System Restore sementara, matikan pagefile, lalu coba lagi.
+> **Kalau tombol Shrink abu-abu atau hasilnya 0 MB**, penyebabnya hampir selalu
+> file yang tidak bisa dipindah. Matikan System Restore sementara dan pindahkan
+> pagefile, lalu coba lagi.
+
+### 0.5b Membersihkan Windows kalau shrink kurang
+
+Kalau Windows hanya menawarkan < 40 GB, bebaskan ruang dulu:
+
+```powershell
+# Disk Cleanup dengan semua opsi
+cleanmgr /sageset:1
+# centang semua (terutama Windows Update Cleanup), lalu:
+cleanmgr /sagerun:1
+```
+
+Cari file besar:
+
+```powershell
+Get-ChildItem C:\Users\Asus -Recurse -File -ErrorAction SilentlyContinue |
+  Sort-Object Length -Descending | Select-Object -First 25 |
+  Select-Object @{n='GB';e={[math]::Round($_.Length/1GB,2)}},FullName
+```
+
+Matikan System Restore sementara — `System Volume Information` memblokir shrink:
+
+`Win + R` → `SystemPropertiesProtection` → pilih **C:** → **Configure** →
+**Disable system protection**
+
+> Nyalakan kembali setelah shrink selesai. Tanpa itu kamu kehilangan rollback
+> driver Windows.
+
+Pindahkan juga folder besar (`Documents`, `Downloads`, `Videos`) ke drive
+eksternal. Isi `C:\Users\Asus\Documents` kamu memang banyak tugas kuliah — itu
+kandidat utama, dan sekalian jadi backup.
 
 ---
 
@@ -166,9 +208,12 @@ Isi dan simpan di HP atau kertas:
 Model laptop    : ASUS TUF Gaming A15 FA506NF
 GPU             : AMD Radeon iGPU + NVIDIA RTX 2050
 Disk            : SAMSUNG MZVL8512HELU (477 GB, satu-satunya)
-Free space      : 51 GB sebelum shrink
+Partisi         : p1 EFI 260MB | p2 MSR | p3 C: 475GB | p4-p5 Recovery
+Free space      : 50.6 GB sebelum shrink
+Shrink dapat    : ______ GB  (catat hasil Disk Management)
 Secure Boot     : dimatikan
 BitLocker       : dimatikan
+System Restore  : dimatikan sementara (nyalakan lagi setelah shrink)
 USB live        : CachyOS <versi>
 USB cadangan    : ada / tidak ada
 ```
@@ -180,10 +225,12 @@ USB cadangan    : ada / tidak ada
 - [ ] Data penting sudah di drive eksternal
 - [ ] `manage-bde -status` → `Fully Decrypted`
 - [ ] `powercfg /H off` sudah dijalankan dan sudah reboot
-- [ ] Unallocated space ≥ 45 GB sudah dibuat
+- [ ] Windows dibersihkan kalau shrink < 40 GB (§0.5b)
+- [ ] Unallocated space ≥ 40 GB sudah dibuat
+- [ ] System Restore dinyalakan kembali setelah shrink
 - [ ] Secure Boot disabled
 - [ ] USB bootable sudah jadi dan sudah dites boot (bukan cuma diflash)
 - [ ] USB live cadangan ada
-- [ ] Catatan di 0.8 sudah disimpan
+- [ ] Catatan di 0.8 sudah disimpan, termasuk **angka shrink**
 
 Kalau ada yang belum, **jangan lanjut** ke [01-cachyos.md](01-cachyos.md).

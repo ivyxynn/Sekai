@@ -265,14 +265,71 @@ fi
 
 if mountpoint -q /boot 2>/dev/null; then
     BOOT_AVAIL=$(df -BG --output=avail /boot 2>/dev/null | tail -1 | tr -dc '0-9')
+    BOOT_FS=$(findmnt -no FSTYPE /boot 2>/dev/null)
+    BOOT_SIZE=$(df -BG --output=size /boot 2>/dev/null | tail -1 | tr -dc '0-9')
     if [ -n "$BOOT_AVAIL" ]; then
         if [ "$BOOT_AVAIL" -ge 2 ]; then
-            pass "/boot tersisa ${BOOT_AVAIL}G"
+            pass "/boot tersisa ${BOOT_AVAIL}G (${BOOT_FS:-?})"
         else
             fail "/boot hanya ${BOOT_AVAIL}G — update kernel bisa gagal"
             note "lihat docs/04-troubleshooting.md §4.2"
         fi
     fi
+    # /boot harus FAT32 kalau pakai Limine
+    if [ -n "$BOOT_FS" ] && [ "$BOOT_FS" != "vfat" ] && [ "$BOOT_FS" != "msdos" ]; then
+        warn "/boot bukan FAT32 ($BOOT_FS) — Limine butuh FAT12/16/32"
+    fi
+    if [ -n "$BOOT_SIZE" ] && [ "$BOOT_SIZE" -lt 2 ]; then
+        warn "/boot hanya ${BOOT_SIZE}G — CachyOS minta minimal 4G untuk Limine"
+        note "kalau ini ESP Windows 260MB, kernel tidak akan muat"
+    fi
+else
+    warn "/boot bukan mount point terpisah"
+    note "layout dual-boot seharusnya punya /boot FAT32 4G sendiri"
+fi
+
+# dual boot: pastikan Windows masih terdeteksi
+step "7b. Dual boot"
+
+if have lsblk; then
+    WIN_PARTS=$(lsblk -no FSTYPE 2>/dev/null | grep -c '^ntfs$')
+    if [ "$WIN_PARTS" -gt 0 ]; then
+        pass "partisi NTFS terdeteksi ($WIN_PARTS) — Windows kemungkinan masih ada"
+    else
+        warn "tidak ada partisi NTFS — Windows mungkin sudah terhapus"
+    fi
+
+    # ESP terpisah untuk Linux?
+    VFAT_COUNT=$(lsblk -no FSTYPE 2>/dev/null | grep -c '^vfat$')
+    if [ "$VFAT_COUNT" -ge 2 ]; then
+        pass "ada $VFAT_COUNT partisi FAT32 (ESP Windows + ESP Linux) — layout benar"
+    elif [ "$VFAT_COUNT" -eq 1 ]; then
+        warn "hanya 1 partisi FAT32 — kemungkinan /boot menumpang di ESP Windows"
+        note "ESP Windows 260MB tidak cukup untuk kernel + driver DKMS"
+    fi
+else
+    warn "lsblk tidak ada, tidak bisa cek partisi"
+fi
+
+if have efibootmgr; then
+    if efibootmgr >/dev/null 2>&1; then
+        if efibootmgr 2>/dev/null | grep -qi 'limine\|cachyos'; then
+            pass "entri boot Limine/CachyOS terdaftar di NVRAM"
+        else
+            warn "entri Limine tidak ditemukan di NVRAM"
+            note "sudo efibootmgr --create --disk /dev/nvme0n1 --part 6 --label Limine --loader '\\EFI\\limine\\limine_x64.efi'"
+        fi
+        if efibootmgr 2>/dev/null | grep -qi 'windows'; then
+            pass "entri boot Windows terdaftar"
+        else
+            warn "entri Windows tidak terlihat — coba: sudo limine-scan"
+        fi
+    else
+        warn "efibootmgr gagal (mungkin bukan UEFI, atau butuh root)"
+    fi
+else
+    warn "efibootmgr tidak ada — tidak bisa cek NVRAM"
+    note "sudo pacman -S --needed efibootmgr"
 fi
 
 # ---------------------------------------------------------------- 8. sesi
